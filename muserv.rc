@@ -1,0 +1,36 @@
+#[crate_id="muserv#0.0.1"];
+#[crate_type="bin"];
+#[desc="A MU* server"];
+#[license="GPL2+"];
+
+#[warn(unnecessary_qualification, non_camel_case_types, non_uppercase_statics, unnecessary_typecast, unused_result)];
+
+use std::task;
+use std::io::timer;
+use std::os;
+use net::{Command, Response, netEntry};
+
+mod db;
+mod net;
+
+fn main()
+{
+	let (port, netChan) = Chan::new();
+	let (netPort, chan) = Chan::new();
+
+	let mut builder = task::task();
+	builder.name("<net>");
+	builder.spawn(proc(){netEntry(netPort, netChan)});
+
+	loop {
+		match port.recv_opt() {
+			Some(command) => chan.send(handleCommand(command)),
+			None          => {os::set_exit_status(1); timer::sleep(1000); return}
+		}
+	}
+}
+
+fn handleCommand(_ : Command) -> Response
+{
+	net::BroadCast(~"Hello World\n")
+}
