@@ -3,4 +3,4 @@
 rustmu
 ======
 
-A MU* server writeen in rust.
+A MU* server written in rust.
