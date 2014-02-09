@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/HildarTheDorf/rustmu.png?branch=master)](https://travis-ci.org/HildarTheDorf/rustmu)
+
 rustmu
 ======
 
