@@ -15,22 +15,33 @@ mod net;
 
 fn main()
 {
-	let (port, netChan) = Chan::new();
-	let (netPort, chan) = Chan::new();
+    let (port, netChan) = Chan::new();
+    let (netPort, chan) = Chan::new();
 
-	let mut builder = task::task();
-	builder.name("<net>");
-	builder.spawn(proc(){netEntry(netPort, netChan)});
+    let mut builder = task::task();
+    builder.name("<net>");
+    builder.spawn(proc(){netEntry(netPort, netChan)});
 
-	loop {
-		match port.recv_opt() {
-			Some(command) => chan.send(handleCommand(command)),
-			None          => {os::set_exit_status(1); timer::sleep(1000); return}
-		}
-	}
+    loop {
+        match port.recv_opt() {
+            Some(command) => match handleCommand(command) {
+                Some(response) => chan.send(response),
+                None           => return
+            },
+            None          => {
+                os::set_exit_status(1);
+                timer::sleep(1000);
+                return
+            }
+        }
+    }
 }
 
-fn handleCommand(_ : Command) -> Response
+fn handleCommand(command : Command) -> Option<Response>
 {
-	net::BroadCast(~"Hello World\n")
+    match command {
+        net::ShutDownComplete         => None,
+        net::TelnetCommand(id, what)  => Some(net::UniCast(id, format!("You sent me a telnet command: {}", what))),
+        net::PlayerString(id, string) => Some(net::UniCast(id, string))
+    }
 }
