@@ -1,11 +1,11 @@
-use std::comm::{Port, Chan, Select};
+use std::comm::{Receiver, Sender, Select};
 use std::io;
 use std::io::{Acceptor, Listener, IoResult};
 use std::io::net::tcp::{TcpListener, TcpStream};
 use std::io::net::ip::{SocketAddr, Ipv4Addr};
 use std::str;
 use std::task;
-use std::vec;
+use std::vec::Vec;
 
 mod telnet;
 
@@ -45,8 +45,8 @@ pub enum Response {
 
 struct Connection {
     id : ID,
-    port : Port<Option<~str>>,
-    chan : Chan<Option<~str>>
+    port : Receiver<Option<~str>>,
+    chan : Sender<Option<~str>>
 }
 
 impl Drop for Connection {
@@ -58,41 +58,41 @@ impl Drop for Connection {
 impl Connection {
     fn new(stream : TcpStream) -> Connection
     {
-        let (clientPort, chan) = Chan::new();
-        let (port, clientChan) = Chan::new();
+        let (clientReceiver, chan) = comm::channel();
+        let (port, clientSender) = comm::channel();
         let writeStream = stream.clone();
         let mut builder = task::task();
 
         builder.name("<generic_client_writer>");
-        builder.spawn(proc(){clientWriteEntry(writeStream, clientPort)});
+        builder.spawn(proc(){clientWriteEntry(writeStream, clientReceiver)});
 
         builder = task::task();
         builder.name("<generic_client_reader>");
-        builder.spawn(proc(){clientReadEntry(stream, clientChan)});
+        builder.spawn(proc(){clientReadEntry(stream, clientSender)});
 
         Connection{id : Unassigned, port : port, chan : chan}
     }
 }
 
-pub fn netEntry(mut mainPort : Port<Response>, mainChan : Chan<Command>)
+pub fn netEntry(mut mainReceiver : Receiver<Response>, mainSender : Sender<Command>)
 {
-    let (mut listenPort, listenChan) = Chan::new();
+    let (mut listenReceiver, listenSender) = comm::channel();
     let mut connections = ~[];
 
     let mut builder = task::task();
     builder.name("listener");
-    builder.spawn(proc(){listenEntry(listenChan)});
+    builder.spawn(proc(){listenEntry(listenSender)});
 
     loop {
-        let maybeCommand = handleResponse(doSelect(&mut mainPort, &mut listenPort, &mainChan, connections), &mut connections);
+        let maybeCommand = handleResponse(doSelect(&mut mainReceiver, &mut listenReceiver, &mainSender, connections), &mut connections);
         match maybeCommand {
-            Some(command) => mainChan.send(command),
+            Some(command) => mainSender.send(command),
             None          => ()
         }
     }
 }
 
-fn clientReadEntry(mut stream : TcpStream, chan : Chan<Option<~str>>)
+fn clientReadEntry(mut stream : TcpStream, chan : Sender<Option<~str>>)
 {
     let mut read_buffer = [0, ..128];
     let mut utf8_buffer = ~[];
@@ -132,7 +132,7 @@ fn clientReadEntry(mut stream : TcpStream, chan : Chan<Option<~str>>)
     }
 }
 
-fn clientWriteEntry(mut stream : TcpStream, port : Port<Option<~str>>)
+fn clientWriteEntry(mut stream : TcpStream, port : Receiver<Option<~str>>)
 {
     loop{
         let message = port.recv();
@@ -151,13 +151,13 @@ fn clientWriteEntry(mut stream : TcpStream, port : Port<Option<~str>>)
     }
 }
 
-fn listenEntry(chan : Chan<TcpStream>)
+fn listenEntry(chan : Sender<TcpStream>)
 {
     let mut acceptor = TcpListener::bind(
         SocketAddr{
             ip : Ipv4Addr(0, 0, 0, 0), port : 6666
         })
-        .ok().expect("Failed to unwrap listen Port after bind()")
+        .ok().expect("Failed to unwrap listen Receiver after bind()")
         .listen()
         .ok().expect("Failed to unwrap listen port after listen()");
     loop {
@@ -169,13 +169,13 @@ fn listenEntry(chan : Chan<TcpStream>)
     }
 }
 
-fn doSelect(mainPort : &mut Port<Response>, listenPort : &mut Port<TcpStream>,
-    mainChan : &Chan<Command>, connections : &mut [Option<Connection>])
+fn doSelect(mainReceiver : &mut Receiver<Response>, listenReceiver : &mut Receiver<TcpStream>,
+    mainSender : &Sender<Command>, connections : &mut [Option<Connection>])
     -> Response
 {
     let sel = Select::new();
-    let mut mainHandle = sel.handle(mainPort);
-    let mut listenHandle = sel.handle(listenPort);
+    let mut mainHandle = sel.handle(mainReceiver);
+    let mut listenHandle = sel.handle(listenReceiver);
     let mut handles = ~[];
     for x in connections.mut_iter() {
         match *x {
@@ -205,7 +205,7 @@ fn doSelect(mainPort : &mut Port<Response>, listenPort : &mut Port<TcpStream>,
         for &(playerID, ref mut handle) in handles.mut_iter() {
             if ret == handle.id() {
                 match handle.recv() {
-                    Some(string) => {mainChan.send(PlayerString(playerID, string)); return Nothing}
+                    Some(string) => {mainSender.send(PlayerString(playerID, string)); return Nothing}
                     None => return Disconnect(playerID)
                 }
             }
